@@ -51,7 +51,7 @@
             Zap, BarChart3, ChevronRight, Activity, Filter, Database, FileText,
             Layers, Power, FileSpreadsheet, BrainCircuit, Languages, Globe,
             MessageCircle, DollarSign, Trees, Utensils, Book, WifiOff, X,
-            HelpCircle, Milestone, Lock, Map, Flag
+            HelpCircle, Milestone, Lock, Map, Flag, Layout, RotateCcw
         } from 'lucide-react';
         
         // --- Firebase ---
@@ -64,7 +64,7 @@
         // =================================================================================
         
         const myFirebaseConfig = {
-  apiKey: "AIzaSyAgNktz8JUCOglOtB-zyle-FSfIV0TbVRc",
+             apiKey: "AIzaSyAgNktz8JUCOglOtB-zyle-FSfIV0TbVRc",
   authDomain: "blackbox-48253.firebaseapp.com",
   projectId: "blackbox-48253",
   storageBucket: "blackbox-48253.firebasestorage.app",
@@ -357,7 +357,7 @@
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/20 ${config.color} border border-white/5`}>{config.label}</span>
-                                        <button onClick={(e) => { e.stopPropagation(); onDeleteTask(task.id); }} className="text-slate-500 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14}/></button>
+                                        <button onClick={(e) => { e.stopPropagation(); onDeleteTask(task.id); }} className="text-slate-500 hover:text-rose-500 transition-opacity p-2"><Trash2 size={14}/></button>
                                     </div>
                                 </div>
                             );
@@ -382,7 +382,7 @@
             );
         };
 
-        const SignalFilter = ({ tasks, t, theme }) => {
+        const SignalFilter = ({ tasks, t, theme, onDeleteTask, onUpdateTask }) => {
             const noiseItems = tasks.filter(t => t.status === 'noise');
             return (
                 <div className="h-full overflow-y-auto p-2 custom-scrollbar space-y-1">
@@ -390,9 +390,13 @@
                         <div className={`text-center text-[10px] py-4 ${theme.textDim}`}>{t.signalClear}</div>
                     ) : (
                         noiseItems.map(item => (
-                            <div key={item.id} className="flex gap-2 items-center p-2 border border-rose-900/30 bg-rose-900/10 rounded">
+                            <div key={item.id} className="flex gap-2 items-center p-2 border border-rose-900/30 bg-rose-900/10 rounded group">
                                 <Activity size={12} className="text-rose-500 shrink-0"/>
-                                <span className="text-rose-400 text-xs font-mono truncate">{item.text}</span>
+                                <span className="text-rose-400 text-xs font-mono truncate flex-1">{item.text}</span>
+                                <div className="flex gap-1">
+                                    <button onClick={() => onUpdateTask(item.id, 'pending')} className="text-slate-500 hover:text-cyan-400 p-1" title="Restore to Pending"><RotateCcw size={12}/></button>
+                                    <button onClick={() => onDeleteTask(item.id)} className="text-slate-500 hover:text-rose-500 p-1" title="Delete Permanent"><Trash2 size={12}/></button>
+                                </div>
                             </div>
                         ))
                     )}
@@ -415,7 +419,7 @@
                         {history.length === 0 && <div className={`text-center text-[10px] py-4 ${theme.textDim}`}>{t.systemReady}</div>}
                         {history.slice().reverse().map((entry, i) => (
                             <div key={i} className="mb-1.5 flex gap-2 group items-center text-xs font-mono">
-                                <button onClick={() => onDeleteLogEntry(entry)} className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-rose-500 transition-opacity"><X size={10} /></button>
+                                <button onClick={() => onDeleteLogEntry(entry)} className="text-slate-600 hover:text-rose-500 transition-opacity p-1"><X size={10} /></button>
                                 <span className="text-slate-500">[{new Date(entry.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}]</span>
                                 <span className="text-cyan-500 flex-1 truncate">{entry.text}</span>
                                 <span className="text-emerald-500">{entry.points}</span>
@@ -498,7 +502,7 @@
                 });
             }, []);
 
-            // Data Sync (Simplified for integration)
+            // Data Sync
             useEffect(() => {
                 if(!user || !db) return;
                 const unsubT = onSnapshot(query(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks')), s => setTasks(s.docs.map(d=>({id:d.id, ...d.data()}))));
@@ -528,7 +532,6 @@
                 else setTasks(p => p.filter(t => t.id !== id));
             };
             const handleClearCompleted = async () => {
-                // Logic to clear done tasks
                 const completed = tasks.filter(t => t.status === 'done');
                 if(db && user) {
                     completed.forEach(t => {
@@ -668,7 +671,7 @@
                             {/* Signal Filter (Smaller height) */}
                             <div className="h-1/4 min-h-[80px] lg:h-1/3 shrink-0">
                                 <Panel title="SIGNAL FILTER" icon={Filter} className="h-full" theme={theme}>
-                                    <SignalFilter tasks={tasks} t={t} theme={theme} />
+                                    <SignalFilter tasks={tasks} t={t} theme={theme} onDeleteTask={handleDeleteTask} onUpdateTask={handleUpdateTask} />
                                 </Panel>
                             </div>
                             
