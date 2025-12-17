@@ -1,0 +1,752 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Tactical Ops Center</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script type="importmap">
+    {
+        "imports": {
+            "react": "https://esm.sh/react@18.2.0",
+            "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+            "lucide-react": "https://esm.sh/lucide-react@0.263.1",
+            "firebase/app": "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js",
+            "firebase/auth": "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js",
+            "firebase/firestore": "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js"
+        }
+    }
+    </script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <style>
+        body { 
+            background-color: #0f172a; 
+            color: #e2e8f0; 
+            -webkit-tap-highlight-color: transparent; 
+            overscroll-behavior-y: none;
+        }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.1); }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(245, 158, 11, 0.3); border-radius: 2px; }
+        
+        .scan-line { 
+            position: fixed; top: 0; left: 0; width: 100%; height: 2px; 
+            background: rgba(245, 158, 11, 0.3); 
+            animation: scan 3s linear infinite; pointer-events: none; z-index: 50; opacity: 0.3; 
+        }
+        @keyframes scan { 0% { transform: translateY(-100vh); } 100% { transform: translateY(100vh); } }
+        
+        input { font-size: 16px; } 
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useEffect, useRef } from 'react';
+        import { createRoot } from 'react-dom/client';
+        import { 
+            Target, List, Crosshair, CheckCircle, PauseCircle, AlertCircle, Scroll, 
+            Plus, Trash2, Eraser, Award, Shield, Briefcase, Home, Download,
+            Zap, BarChart3, ChevronRight, Activity, Filter, Database, FileText,
+            Layers, Power, FileSpreadsheet, BrainCircuit, Languages, Globe,
+            MessageCircle, DollarSign, Trees, Utensils, Book, WifiOff, X,
+            HelpCircle, Milestone, Lock, Map, Flag
+        } from 'lucide-react';
+        
+        // --- Firebase ---
+        import { initializeApp } from 'firebase/app';
+        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+        import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, onSnapshot, serverTimestamp, query, orderBy, increment } from 'firebase/firestore';
+
+        // =================================================================================
+        // ▼▼▼ 使用者設定區 (TODO: 請在此填入您的資料庫設定) ▼▼▼
+        // =================================================================================
+        
+        const myFirebaseConfig = {
+  apiKey: "AIzaSyAgNktz8JUCOglOtB-zyle-FSfIV0TbVRc",
+  authDomain: "blackbox-48253.firebaseapp.com",
+  projectId: "blackbox-48253",
+  storageBucket: "blackbox-48253.firebasestorage.app",
+  messagingSenderId: "349317379720",
+  appId: "1:349317379720:web:e006daa4643c5310ebd13d"
+        };
+
+        // =================================================================================
+
+        const firebaseConfig = (typeof __firebase_config !== 'undefined') ? JSON.parse(__firebase_config) : myFirebaseConfig;
+        const app = Object.keys(firebaseConfig).length > 0 ? initializeApp(firebaseConfig) : null;
+        const auth = app ? getAuth(app) : null;
+        const db = app ? getFirestore(app) : null;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'tactical-ops-standalone';
+
+        // --- Mock Data ---
+        const MOCK_DATA = {
+            stats: { pro: 4250, life: 3100 },
+            tasks: [
+                { id: 'm1', text: '完成本日核心任務 A', status: 'pending' },
+                { id: 'm2', text: '整理會議記錄', status: 'waiting' },
+                { id: 'm3', text: '預約牙醫', status: 'noise' },
+                { id: 'm4', text: '⚔️ 探索：研究新工具', status: 'pending', tag: 'research' },
+            ],
+            history: [
+                { id: 'h1', text: '深度工作', points: '+100 XP', type: 'pro', timestamp: new Date().toISOString() },
+            ]
+        };
+
+        // --- Configuration ---
+        const PHASE_ACTIONS = {
+            reset: [
+                { id: 'retreat', icon: Shield, xp: 50, type: 'life', color: 'emerald' },
+                { id: 'reset', icon: Layers, xp: 30, type: 'life', color: 'cyan' },
+                { id: 'sop', icon: FileText, xp: 100, type: 'pro', color: 'amber' },
+                { id: 'no', icon: Power, xp: 100, type: 'life', color: 'rose' }
+            ],
+            build: [
+                { id: 'sop_adv', icon: FileText, xp: 150, type: 'pro', color: 'amber' },
+                { id: 'data', icon: FileSpreadsheet, xp: 80, type: 'pro', color: 'cyan' },
+                { id: 'deep', icon: BrainCircuit, xp: 100, type: 'pro', color: 'indigo' },
+                { id: 'english', icon: Languages, xp: 50, type: 'pro', color: 'rose' }
+            ],
+            transition: [
+                { id: 'portfolio', icon: (props) => <Briefcase {...props} />, xp: 200, type: 'pro', color: 'amber' },
+                { id: 'network', icon: MessageCircle, xp: 50, type: 'pro', color: 'cyan' },
+                { id: 'saving', icon: DollarSign, xp: 50, type: 'life', color: 'emerald' },
+                { id: 'research', icon: Globe, xp: 50, type: 'pro', color: 'indigo' }
+            ],
+            landing: [
+                { id: 'nature', icon: Trees, xp: 100, type: 'life', color: 'emerald' },
+                { id: 'cook', icon: Utensils, xp: 50, type: 'life', color: 'orange' },
+                { id: 'read', icon: Book, xp: 50, type: 'life', color: 'indigo' },
+                { id: 'offline', icon: WifiOff, xp: 100, type: 'life', color: 'slate' }
+            ]
+        };
+
+        const PHASE_INFO = {
+            reset: { 
+                label: "PHASE 1: 整頓 (RESET)", 
+                max: 3000, 
+                next: "build", 
+                color: "cyan",
+                desc: "清空 • 秩序 • 打底",
+                goal: "建立「後台支援能力」的基礎，恢復身心原廠設定，清除不必要的雜訊。"
+            },
+            build: { 
+                label: "PHASE 2: 累積 (BUILD)", 
+                max: 8000, 
+                next: "transition", 
+                color: "amber",
+                desc: "專業成形 • 數據素養",
+                goal: "轉型為「資料/系統」專業人員，累積硬實力籌碼，建立可展示的作品集。"
+            },
+            transition: { 
+                label: "PHASE 3: 轉場 (TRANSITION)", 
+                max: 12000, 
+                next: "landing", 
+                color: "indigo",
+                desc: "申請 • 身份轉換",
+                goal: "取得北歐入場券 (Offer) 與簽證資格，完成物理與心理的遷移準備。"
+            },
+            landing: { 
+                label: "PHASE 4: 落地 (LANDING)", 
+                max: 99999, 
+                next: "landing", 
+                color: "emerald",
+                desc: "穩定 • 第二人生",
+                goal: "建立安靜、穩定的北歐生活與在地連結，享受飛行的成果。"
+            }
+        };
+
+        const TRANSLATIONS = {
+            zh: {
+                quickActions: "快速行動 (QUICK ACTIONS)",
+                missionObjectives: "任務指令",
+                uplinkEstablished: "連線正常",
+                noDirectives: "無進行中指令",
+                awaitingInput: "等待輸入...",
+                enterDirective: "輸入戰術指令...",
+                signalClear: "訊號清晰",
+                patternDetected: "雜訊偵測",
+                archiveLogs: "封存紀錄",
+                systemReady: "SYSTEM READY",
+                milestoneMap: "戰術地圖 (TACTICAL MAP)",
+                status: {
+                    optimal: "完成",
+                    standby: "等待",
+                    jammed: "卡關",
+                    active: "進行中"
+                },
+                actionLabels: {
+                    retreat: "戰術撤退", reset: "空間重置", sop: "SOP 建立", no: "拒絕社交",
+                    sop_adv: "SOP 升級", data: "資料整理", deep: "深度工作", english: "英文模式",
+                    portfolio: "作品集", network: "建立連結", saving: "財務檢視", research: "北歐研究",
+                    nature: "自然療癒", cook: "自煮滋養", read: "深度閱讀", offline: "完全離線"
+                },
+                modals: {
+                    actionTitle: "行動定義卡",
+                    actionSub: "Action Definition Cards"
+                }
+            }
+        };
+
+        const THEMES = {
+            dark: {
+                bg: 'bg-slate-950',
+                panel: 'bg-slate-900/80',
+                panelBorder: 'border-slate-800',
+                textMain: 'text-slate-200',
+                textDim: 'text-slate-500',
+                textHighlight: 'text-white',
+                inputBg: 'bg-slate-950',
+                inputBorder: 'border-slate-700',
+                buttonInactive: 'bg-slate-800/50 border-slate-700 text-slate-400',
+                logBg: 'bg-black/20',
+                checklistBg: 'bg-slate-900/50',
+                checklistItemBg: 'bg-slate-800/40',
+                modalBg: 'bg-slate-900',
+                modalBorder: 'border-slate-700'
+            }
+        };
+
+        // --- Components ---
+
+        const Panel = ({ children, className = "", title, icon: Icon, actions, theme }) => (
+            <div className={`border rounded-xl overflow-hidden flex flex-col backdrop-blur-sm ${theme.panel} ${theme.panelBorder} ${className}`}>
+                {(title || Icon) && (
+                    <div className={`flex items-center justify-between px-4 py-3 border-b bg-black/20 shrink-0 ${theme.panelBorder}`}>
+                        <div className="flex items-center gap-2">
+                            {Icon && <Icon size={16} className="text-amber-500" />}
+                            <h3 className={`text-xs font-bold uppercase tracking-widest ${theme.textDim}`}>{title}</h3>
+                        </div>
+                        {actions && <div className="flex items-center gap-2">{actions}</div>}
+                    </div>
+                )}
+                <div className="relative flex-1 flex flex-col min-h-0">
+                    {children}
+                </div>
+            </div>
+        );
+
+        const DetailModal = ({ title, color, children, onClose, theme }) => (
+            <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-6 animate-in fade-in duration-200">
+                <div className={`w-full max-w-2xl max-h-[85vh] ${theme.modalBg} border ${theme.modalBorder} rounded-2xl shadow-2xl flex flex-col overflow-hidden`}>
+                    <div className={`p-5 border-b ${theme.modalBorder} flex justify-between items-center bg-black/20`}>
+                        <div className="flex items-center gap-3">
+                            <Map size={20} className={`text-${color}-500`} />
+                            <h2 className={`text-lg font-bold font-mono uppercase tracking-widest text-white`}>{title}</h2>
+                        </div>
+                        <button onClick={onClose} className={`${theme.textDim} hover:text-white transition-colors`}>
+                            <X size={24} />
+                        </button>
+                    </div>
+                    <div className="p-6 overflow-y-auto custom-scrollbar flex-1">
+                        {children}
+                    </div>
+                </div>
+            </div>
+        );
+
+        const MilestoneView = ({ currentPhaseId, totalXP, theme, t }) => {
+            const phasesOrder = ['reset', 'build', 'transition', 'landing'];
+            
+            return (
+                <div className="space-y-8 font-mono">
+                    <div className="p-4 border border-indigo-500/30 bg-indigo-500/10 rounded flex justify-between items-center">
+                        <div>
+                            <h3 className="text-indigo-400 font-bold text-sm">TOTAL FLIGHT MILEAGE</h3>
+                            <p className="text-xs text-indigo-300/70">XP 決定當前飛行階段與可用戰術</p>
+                        </div>
+                        <div className="text-2xl font-black text-white">{totalXP} XP</div>
+                    </div>
+
+                    <div className="space-y-6 relative border-l-2 border-slate-800 ml-3 pl-8 pb-2">
+                        {phasesOrder.map((phaseKey) => {
+                            const info = PHASE_INFO[phaseKey];
+                            const actions = PHASE_ACTIONS[phaseKey];
+                            const isActive = phaseKey === currentPhaseId;
+                            
+                            return (
+                                <div key={phaseKey} className={`relative ${isActive ? 'opacity-100' : 'opacity-60'}`}>
+                                    <div className={`absolute -left-[41px] top-0 w-6 h-6 rounded-full border-4 bg-slate-900 flex items-center justify-center ${isActive ? `border-${info.color}-500 animate-pulse` : 'border-slate-700'}`}>
+                                        {isActive && <div className={`w-2 h-2 rounded-full bg-${info.color}-500`}></div>}
+                                    </div>
+                                    
+                                    <div className={`p-4 rounded-xl border ${isActive ? `border-${info.color}-500/50 bg-${info.color}-500/5` : 'border-slate-800 bg-slate-900/50'}`}>
+                                        <div className="flex justify-between items-start mb-3">
+                                            <h4 className={`font-bold text-sm ${isActive ? `text-${info.color}-400` : 'text-slate-400'}`}>
+                                                {info.label}
+                                            </h4>
+                                            <span className="text-[10px] font-mono text-slate-500 border border-slate-700 px-1.5 rounded">
+                                                Target: {info.max} XP
+                                            </span>
+                                        </div>
+                                        
+                                        {/* Added Description and Goal */}
+                                        <div className="mb-4 text-xs text-slate-400 space-y-1">
+                                            <p className="font-bold text-slate-300">{info.desc}</p>
+                                            <p className="opacity-80">{info.goal}</p>
+                                        </div>
+                                        
+                                        <div className="grid grid-cols-2 gap-3 border-t border-slate-800/50 pt-3">
+                                            {actions.map((act, i) => (
+                                                <div key={i} className="flex items-center gap-2 text-xs text-slate-300">
+                                                    <div className={`p-1.5 rounded bg-slate-800 text-${act.color}-500`}>
+                                                        {typeof act.icon === 'function' ? act.icon({ size: 12 }) : <act.icon size={12} />}
+                                                    </div>
+                                                    <span>{TRANSLATIONS.zh.actionLabels[act.id]}</span>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        const TacticalHUD = ({ tasks, onAddTask, onUpdateTask, onDeleteTask, onClearCompleted, t, theme }) => {
+            const [input, setInput] = useState('');
+            
+            const cycleStatus = (task) => {
+                const map = { pending: 'done', done: 'waiting', waiting: 'noise', noise: 'pending' };
+                onUpdateTask(task.id, map[task.status]);
+            };
+
+            const getStatusConfig = (task) => {
+                const isQuest = task.tag === 'research' || (task.text && task.text.startsWith('⚔️'));
+                if (isQuest) {
+                     switch(task.status) {
+                        case 'done': return { icon: Scroll, color: 'text-emerald-500', border: 'border-emerald-500/50', bg: 'bg-emerald-500/10', label: 'QUEST COMPLETE' };
+                        case 'waiting': return { icon: Scroll, color: 'text-amber-500', border: 'border-amber-500/50', bg: 'bg-amber-500/10', label: 'QUEST PAUSED' };
+                        case 'noise': return { icon: Scroll, color: 'text-rose-500', border: 'border-rose-500/50', bg: 'bg-rose-500/10', label: 'QUEST DROPPED' };
+                        default: return { icon: Scroll, color: 'text-indigo-400', border: 'border-indigo-500/50', bg: 'bg-indigo-500/10', label: 'QUEST ACTIVE' };
+                    }
+                }
+                switch(task.status) {
+                    case 'done': return { icon: CheckCircle, color: 'text-emerald-500', border: 'border-emerald-500/30', bg: 'bg-emerald-500/10', label: t.status.optimal };
+                    case 'waiting': return { icon: PauseCircle, color: 'text-amber-500', border: 'border-amber-500/30', bg: 'bg-amber-500/10', label: t.status.standby };
+                    case 'noise': return { icon: AlertCircle, color: 'text-rose-500', border: 'border-rose-500/30', bg: 'bg-rose-500/10', label: t.status.jammed };
+                    default: return { icon: Crosshair, color: 'text-cyan-500', border: 'border-cyan-500/30', bg: 'bg-cyan-500/10', label: t.status.active };
+                }
+            };
+
+            const sortedTasks = [...tasks].filter(t => t.status !== 'noise').sort((a,b) => {
+                const order = { waiting: 1, pending: 2, done: 3 };
+                return (order[a.status] || 99) - (order[b.status] || 99);
+            });
+
+            return (
+                <div className="flex flex-col h-full min-h-0">
+                    <div className="flex-1 overflow-y-auto space-y-2 p-4 custom-scrollbar">
+                        {sortedTasks.length === 0 && (
+                            <div className={`h-full flex flex-col items-center justify-center text-xs ${theme.textDim}`}>
+                                <p>{t.noDirectives}</p>
+                                <p className="opacity-50 mt-1">{t.awaitingInput}</p>
+                            </div>
+                        )}
+                        {sortedTasks.map(task => {
+                            const config = getStatusConfig(task);
+                            const Icon = config.icon;
+                            return (
+                                <div key={task.id} onClick={() => cycleStatus(task)} className={`relative p-3 rounded border flex items-center justify-between group cursor-pointer transition-all ${config.bg} ${config.border}`}>
+                                    <div className="flex items-center gap-3 overflow-hidden">
+                                        <Icon size={18} className={`${config.color} shrink-0`} />
+                                        <span className={`text-sm truncate ${task.status === 'done' ? 'text-slate-500 line-through' : theme.textMain}`}>{task.text}</span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/20 ${config.color} border border-white/5`}>{config.label}</span>
+                                        <button onClick={(e) => { e.stopPropagation(); onDeleteTask(task.id); }} className="text-slate-500 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14}/></button>
+                                    </div>
+                                </div>
+                            );
+                        })}
+                    </div>
+                    
+                    <div className={`p-4 border-t ${theme.panelBorder} ${theme.checklistBg}`}>
+                        <div className={`flex items-center gap-2 border rounded px-3 py-2 ${theme.inputBg} ${theme.inputBorder}`}>
+                            <span className="text-cyan-500 font-mono">{'>'}</span>
+                            <input 
+                                type="text" 
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === 'Enter' && input.trim()) { onAddTask(input); setInput(''); } }}
+                                placeholder={t.enterDirective}
+                                className={`flex-1 bg-transparent border-none focus:outline-none text-sm placeholder:${theme.textDim} ${theme.textMain}`}
+                            />
+                            <button onClick={() => { if(input.trim()) { onAddTask(input); setInput(''); }}} className="text-slate-500 hover:text-cyan-400"><Plus size={16}/></button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        const SignalFilter = ({ tasks, t, theme }) => {
+            const noiseItems = tasks.filter(t => t.status === 'noise');
+            return (
+                <div className="h-full overflow-y-auto p-2 custom-scrollbar space-y-1">
+                    {noiseItems.length === 0 ? (
+                        <div className={`text-center text-[10px] py-4 ${theme.textDim}`}>{t.signalClear}</div>
+                    ) : (
+                        noiseItems.map(item => (
+                            <div key={item.id} className="flex gap-2 items-center p-2 border border-rose-900/30 bg-rose-900/10 rounded">
+                                <Activity size={12} className="text-rose-500 shrink-0"/>
+                                <span className="text-rose-400 text-xs font-mono truncate">{item.text}</span>
+                            </div>
+                        ))
+                    )}
+                </div>
+            );
+        };
+
+        const FlightRecorder = ({ history, onClearHistory, onDeleteLogEntry, updateMiles, currentPhaseId, t, theme }) => {
+            const actionsList = PHASE_ACTIONS[currentPhaseId] || PHASE_ACTIONS.reset;
+            const scrollRef = useRef(null);
+
+            useEffect(() => {
+                if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+            }, [history]);
+
+            return (
+                <div className="flex flex-col h-full">
+                    {/* Log Console */}
+                    <div className={`flex-1 overflow-y-auto p-2 custom-scrollbar border-b ${theme.panelBorder} ${theme.logBg}`} ref={scrollRef}>
+                        {history.length === 0 && <div className={`text-center text-[10px] py-4 ${theme.textDim}`}>{t.systemReady}</div>}
+                        {history.slice().reverse().map((entry, i) => (
+                            <div key={i} className="mb-1.5 flex gap-2 group items-center text-xs font-mono">
+                                <button onClick={() => onDeleteLogEntry(entry)} className="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-rose-500 transition-opacity"><X size={10} /></button>
+                                <span className="text-slate-500">[{new Date(entry.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}]</span>
+                                <span className="text-cyan-500 flex-1 truncate">{entry.text}</span>
+                                <span className="text-emerald-500">{entry.points}</span>
+                            </div>
+                        ))}
+                    </div>
+
+                    {/* Quick Actions */}
+                    <div className={`p-3 ${theme.checklistBg}`}>
+                        <div className="flex justify-between items-center mb-2 px-1">
+                            <span className={`text-[10px] font-bold uppercase ${theme.textDim}`}>{t.quickActions}</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
+                            {actionsList.map((action, i) => (
+                                <button
+                                    key={i}
+                                    onClick={() => updateMiles(action.id, action.xp, t.actionLabels[action.id])}
+                                    className={`border ${theme.buttonInactive} rounded flex items-center justify-between px-2 py-2 hover:border-${action.color}-500 hover:text-${action.color}-500 transition-all group`}
+                                >
+                                    <div className="flex items-center gap-2">
+                                        {typeof action.icon === 'function' ? action.icon({ size: 14, className: `text-${action.color}-500` }) : <action.icon size={14} className={`text-${action.color}-500`} />}
+                                        <span className={`text-[10px] font-bold group-hover:text-white ${theme.textDim}`}>{t.actionLabels[action.id]}</span>
+                                    </div>
+                                    <span className={`text-[9px] text-${action.color}-500`}>+{action.xp}</span>
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- Main App ---
+        const App = () => {
+            const [user, setUser] = useState(null);
+            const [activeSection, setActiveSection] = useState(null);
+            const [mobileTab, setMobileTab] = useState('tactical'); // 'tactical' or 'ops'
+            
+            // Data States
+            const [tasks, setTasks] = useState([]);
+            const [history, setHistory] = useState([]);
+            const [proXp, setProXp] = useState(0);
+            const [lifeXp, setLifeXp] = useState(0);
+            const [loading, setLoading] = useState(true);
+            const [toast, setToast] = useState(null);
+            const [showMilestones, setShowMilestones] = useState(false);
+            
+            // Theme & Lang
+            const theme = THEMES['dark'];
+            const t = TRANSLATIONS['zh'];
+
+            // Phase Calculation logic
+            const totalXP = proXp + lifeXp;
+            let currentPhaseId = 'reset';
+            if (totalXP >= 3000) currentPhaseId = 'build';
+            if (totalXP >= 8000) currentPhaseId = 'transition';
+            if (totalXP >= 12000) currentPhaseId = 'landing';
+            
+            const phaseInfo = PHASE_INFO[currentPhaseId];
+            const progressPercent = Math.min((totalXP / phaseInfo.max) * 100, 100);
+
+            // Auth
+            useEffect(() => {
+                if(!auth) { 
+                    setTasks(MOCK_DATA.tasks); 
+                    setHistory(MOCK_DATA.history); 
+                    setProXp(MOCK_DATA.stats.pro); 
+                    setLifeXp(MOCK_DATA.stats.life);
+                    setLoading(false); 
+                    return; 
+                }
+                signInAnonymously(auth).catch(e => console.error(e));
+                return onAuthStateChanged(auth, u => {
+                    setUser(u);
+                    if (!u) {
+                        setTasks(MOCK_DATA.tasks); 
+                        setHistory(MOCK_DATA.history); 
+                        setLoading(false);
+                    }
+                });
+            }, []);
+
+            // Data Sync (Simplified for integration)
+            useEffect(() => {
+                if(!user || !db) return;
+                const unsubT = onSnapshot(query(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks')), s => setTasks(s.docs.map(d=>({id:d.id, ...d.data()}))));
+                const unsubH = onSnapshot(query(collection(db, 'artifacts', appId, 'users', user.uid, 'history')), s => {
+                    const h = s.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
+                    setHistory(h);
+                });
+                const unsubS = onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'data', 'stats'), s => {
+                    if(s.exists()) { setProXp(s.data().pro||0); setLifeXp(s.data().life||0); }
+                });
+                setLoading(false);
+                return () => { unsubT(); unsubH(); unsubS(); };
+            }, [user]);
+
+            // Handlers
+            const handleAddTask = async (text) => {
+                if(!text.trim()) return;
+                if(db && user) await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'), { text, status: 'pending', createdAt: serverTimestamp() });
+                else setTasks(p => [{id: Date.now(), text, status: 'pending'}, ...p]);
+            };
+            const handleUpdateTask = async (id, status) => {
+                if(db && user && !id.toString().startsWith('m')) await updateDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', id), { status });
+                else setTasks(p => p.map(t => t.id === id ? {...t, status} : t));
+            };
+            const handleDeleteTask = async (id) => {
+                if(db && user && !id.toString().startsWith('m')) await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', id));
+                else setTasks(p => p.filter(t => t.id !== id));
+            };
+            const handleClearCompleted = async () => {
+                // Logic to clear done tasks
+                const completed = tasks.filter(t => t.status === 'done');
+                if(db && user) {
+                    completed.forEach(t => {
+                        if(!t.id.toString().startsWith('m')) deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'tasks', t.id));
+                    });
+                }
+                setTasks(prev => prev.filter(t => t.status !== 'done'));
+            };
+            const handleUpdateMiles = async (actionId, amount, reason) => {
+                let type = 'life';
+                const def = Object.values(PHASE_ACTIONS).flat().find(a=>a.id===actionId);
+                if(def) type = def.type;
+                if(db && user) {
+                    const statsRef = doc(db, 'artifacts', appId, 'users', user.uid, 'data', 'stats');
+                    await setDoc(statsRef, { [type]: increment(amount) }, { merge: true });
+                    await addDoc(collection(db, 'artifacts', appId, 'users', user.uid, 'history'), { text: reason, points: `+${amount}`, amount, type, timestamp: new Date().toISOString() });
+                } else {
+                    if(type === 'pro') setProXp(p=>p+amount); else setLifeXp(l=>l+amount);
+                    setHistory(p=>[...p, {id: Date.now(), text: reason, points: `+${amount}`, timestamp: new Date().toISOString()}]);
+                }
+            };
+            const handleClearHistory = async () => setHistory([]);
+
+            const handleDeleteLogEntry = async (entry) => {
+                if(db && user && !entry.id.toString().startsWith('h')) {
+                    if (entry.type && entry.amount) {
+                        const statsRef = doc(db, 'artifacts', appId, 'users', user.uid, 'data', 'stats');
+                        await setDoc(statsRef, { [entry.type]: increment(-entry.amount) }, { merge: true });
+                    }
+                    await deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'history', entry.id));
+                } else {
+                     setHistory(prev => prev.filter(h => h.id !== entry.id));
+                     if (entry.type === 'pro') setProXp(p => p - entry.amount);
+                     else setLifeXp(l => l - entry.amount);
+                }
+            };
+
+            if (loading) return <div className="h-[100dvh] flex items-center justify-center text-amber-500 font-mono bg-slate-950">TACTICAL SYSTEM LOADING...</div>;
+
+            return (
+                <div className="h-[100dvh] bg-slate-950 text-slate-200 font-mono p-4 md:p-6 pb-20 relative overflow-hidden flex flex-col">
+                    <div className="scan-line"></div>
+                    
+                    {/* Header: XP Gauges (Fixed at top) */}
+                    <header className="mb-4 grid grid-cols-2 gap-3 shrink-0">
+                        <div 
+                            className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex flex-col justify-between h-20 relative overflow-hidden group hover:border-orange-500/50 transition-colors cursor-pointer" 
+                            onClick={() => addXp('pro', 10, 'Manual Pro XP')}
+                        >
+                            <div className="flex items-center gap-2 text-[10px] text-slate-500 uppercase tracking-wider mb-1 font-bold">
+                                <Briefcase size={12}/> Career
+                            </div>
+                            <div className="text-2xl font-black text-orange-500 font-mono tracking-tighter tabular-nums">{proXp}</div>
+                             <div className="absolute bottom-0 left-0 h-1 bg-orange-500 transition-all duration-1000" style={{width: `${Math.min((proXp % 1000)/1000*100, 100)}%`}}></div>
+                        </div>
+
+                        <div 
+                            className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex flex-col justify-between h-20 relative overflow-hidden group hover:border-emerald-500/50 transition-colors cursor-pointer" 
+                            onClick={() => addXp('life', 10, 'Manual Life XP')}
+                        >
+                            <div className="flex items-center gap-2 text-[10px] text-slate-500 uppercase tracking-wider mb-1 font-bold">
+                                <Home size={12}/> Life
+                            </div>
+                            <div className="text-2xl font-black text-emerald-500 font-mono tracking-tighter tabular-nums">{lifeXp}</div>
+                            <div className="w-full bg-slate-800 h-1.5 rounded-full mt-2 overflow-hidden">
+                                <div className="h-full bg-emerald-500 transition-all duration-1000" style={{width: `${Math.min((lifeXp % 1000)/1000*100, 100)}%`}}></div>
+                            </div>
+                        </div>
+                    </header>
+                    
+                    {/* Phase Progress Bar (Clickable) */}
+                    <div 
+                        className="mb-4 px-1 shrink-0 cursor-pointer group"
+                        onClick={() => setShowMilestones(true)}
+                    >
+                        <div className="flex justify-between items-center text-[10px] text-slate-500 mb-1 uppercase tracking-wider group-hover:text-cyan-400 transition-colors">
+                            <span className="flex items-center gap-1">
+                                <Milestone size={10} /> {phaseInfo.label}
+                            </span>
+                            <span>{totalXP} / {phaseInfo.max}</span>
+                        </div>
+                        <div className="w-full bg-slate-900 h-1.5 rounded-full overflow-hidden border border-slate-800 group-hover:border-cyan-500/50 transition-colors">
+                            <div 
+                                className={`h-full bg-${phaseInfo.color}-500 transition-all duration-1000 shadow-[0_0_10px_currentColor]`} 
+                                style={{width: `${progressPercent}%`}}
+                            ></div>
+                        </div>
+                    </div>
+
+                    {/* Mobile Tab Switcher */}
+                    <div className="lg:hidden flex mb-2 bg-slate-900 rounded p-1 border border-slate-800 shrink-0">
+                        <button 
+                            onClick={() => setMobileTab('tactical')}
+                            className={`flex-1 py-2 text-xs font-bold rounded transition-all ${mobileTab === 'tactical' ? 'bg-cyan-500/20 text-cyan-400' : 'text-slate-500'}`}
+                        >
+                            任務指令 (TACTICAL)
+                        </button>
+                        <button 
+                            onClick={() => setMobileTab('ops')}
+                            className={`flex-1 py-2 text-xs font-bold rounded transition-all ${mobileTab === 'ops' ? 'bg-amber-500/20 text-amber-400' : 'text-slate-500'}`}
+                        >
+                            後勤支援 (OPS)
+                        </button>
+                    </div>
+
+                    {/* Main Content (Flex Layout for Mobile Stability) */}
+                    <main className="flex-1 min-h-0 flex flex-col lg:grid lg:grid-cols-12 gap-4 lg:gap-6 overflow-hidden">
+                        
+                        {/* Left: Task Management (Takes ~50% on mobile) */}
+                        <div className={`flex-1 min-h-0 flex-col lg:col-span-7 border border-slate-800 rounded-xl bg-slate-900/50 backdrop-blur-sm overflow-hidden ${mobileTab === 'tactical' ? 'flex' : 'hidden lg:flex'}`}>
+                            <div className="flex items-center justify-between px-3 py-2 border-b border-slate-800 bg-black/20 shrink-0">
+                                <div className="flex items-center gap-2">
+                                    <Target size={14} className="text-amber-500" />
+                                    <h3 className="text-[10px] font-bold uppercase tracking-widest text-slate-400">TACTICAL</h3>
+                                </div>
+                                <div className="flex gap-1">
+                                    <div className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse"></div>
+                                    <div className="w-1.5 h-1.5 rounded-full bg-amber-500"></div>
+                                    <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                                </div>
+                            </div>
+                            <div className="flex-1 min-h-0 relative">
+                                <TacticalHUD 
+                                    tasks={tasks} 
+                                    onAddTask={handleAddTask} 
+                                    onUpdateTask={handleUpdateTask} 
+                                    onDeleteTask={handleDeleteTask}
+                                    onClearCompleted={handleClearCompleted}
+                                    t={t}
+                                    theme={theme}
+                                />
+                            </div>
+                        </div>
+
+                        {/* Right: Ops Support (Takes remaining space) */}
+                        <div className={`flex-1 min-h-0 flex-col lg:col-span-5 gap-3 lg:gap-4 shrink-0 ${mobileTab === 'ops' ? 'flex' : 'hidden lg:flex'}`}>
+                            {/* Signal Filter (Smaller height) */}
+                            <div className="h-1/4 min-h-[80px] lg:h-1/3 shrink-0">
+                                <Panel title="SIGNAL FILTER" icon={Filter} className="h-full" theme={theme}>
+                                    <SignalFilter tasks={tasks} t={t} theme={theme} />
+                                </Panel>
+                            </div>
+                            
+                            {/* Recorder & Actions (Takes rest) */}
+                            <div className="flex-1 min-h-0">
+                                <Panel title="FLIGHT RECORDER" icon={Database} className="h-full" theme={theme} actions={
+                                    <button onClick={handleClearHistory} className="hover:text-rose-500 transition-colors"><Eraser size={12}/></button>
+                                }>
+                                    <FlightRecorder 
+                                        history={history}
+                                        onClearHistory={handleClearHistory}
+                                        onDeleteLogEntry={handleDeleteLogEntry}
+                                        updateMiles={handleUpdateMiles}
+                                        currentPhaseId={currentPhaseId}
+                                        t={t}
+                                        theme={theme}
+                                    />
+                                </Panel>
+                            </div>
+                        </div>
+                    </main>
+
+                    {/* Milestones Modal */}
+                    {showMilestones && (
+                        <DetailModal 
+                            title={t.milestoneMap} 
+                            color="cyan" 
+                            onClose={() => setShowMilestones(false)} 
+                            theme={theme}
+                        >
+                            <MilestoneView 
+                                currentPhaseId={currentPhaseId} 
+                                totalXP={totalXP} 
+                                theme={theme} 
+                                t={t} 
+                            />
+                        </DetailModal>
+                    )}
+                    
+                    {/* Action Definition Modal (Triggered from Quick Actions Help) */}
+                    {activeSection === 'actionDefs' && (
+                         <DetailModal
+                            title={t.modals.actionTitle}
+                            color="rose"
+                            onClose={() => setActiveSection(null)}
+                            theme={theme}
+                        >
+                            <div className="space-y-6 font-mono">
+                                <div className="p-4 border border-rose-500/50 bg-rose-500/10 rounded">
+                                    <h3 className="text-rose-400 font-bold mb-2 flex items-center gap-2"><Zap size={18}/> {t.modals.actionTitle}</h3>
+                                    <p className="text-xs text-rose-300">{t.modals.actionSub}</p>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {t.modals.actionsDef[currentPhaseId].map((item, i) => (
+                                        <div key={i} className={`${theme.bg} border ${theme.panelBorder} p-4 rounded-xl flex flex-col gap-2`}>
+                                            <h4 className="font-bold text-sm text-cyan-400">{item.title}</h4>
+                                            <p className={`text-xs ${theme.textDim} leading-relaxed`}>{item.desc}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </DetailModal>
+                    )}
+
+                    {/* Toast */}
+                    {toast && (
+                        <div className="fixed bottom-8 left-1/2 transform -translate-x-1/2 z-50 animate-in slide-in-from-bottom-5 fade-in duration-300 pointer-events-none">
+                            <div className="bg-slate-800/90 border border-amber-500/50 text-amber-400 px-4 py-2 rounded-full shadow-lg text-xs font-bold flex items-center gap-2 backdrop-blur whitespace-nowrap">
+                                <Award size={14} /> {toast}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const root = createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
