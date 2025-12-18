@@ -4,6 +4,35 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Tactical Ops Center</title>
+    
+    <!-- 系統診斷腳本 -->
+    <script>
+        window.onerror = function(msg, url, line, col, error) {
+            if (msg.includes("ResizeObserver")) return;
+            const consoleDiv = document.getElementById('sys-console');
+            if (consoleDiv) {
+                consoleDiv.style.display = 'block';
+                if (msg.includes("auth/unauthorized-domain") || (error && error.code === "auth/unauthorized-domain")) {
+                     const currentDomain = window.location.hostname || "file://";
+                     consoleDiv.innerHTML = `
+                        <div style="color: #fbbf24; margin-bottom: 8px;"><strong>⚠️ 無法登入：網域未授權</strong></div>
+                        <div style="font-size: 12px; color: #cbd5e1;">
+                            Google 安全機制攔截了登入請求。<br/>
+                            請將目前的網域 <code>${currentDomain}</code> 加入 Firebase 白名單：<br/>
+                            Firebase Console > Authentication > Settings > Authorized domains
+                        </div>
+                     `;
+                } else {
+                    const err = document.createElement('div');
+                    err.style.color = '#ef4444';
+                    err.innerHTML = `<strong>[SYSTEM ERROR]:</strong> ${msg}`;
+                    consoleDiv.appendChild(err);
+                }
+            }
+            return false;
+        };
+    </script>
+
     <script src="https://cdn.tailwindcss.com"></script>
     <script type="importmap">
     {
@@ -37,10 +66,21 @@
         @keyframes scan { 0% { transform: translateY(-100vh); } 100% { transform: translateY(100vh); } }
         
         input { font-size: 16px; } 
+
+        #sys-console {
+            display: none;
+            position: fixed; top: 60px; left: 20px; right: 20px;
+            background: rgba(15, 23, 42, 0.95);
+            border: 1px solid #ef4444;
+            padding: 20px; border-radius: 8px; z-index: 9999;
+            font-family: monospace; font-size: 14px;
+            box-shadow: 0 0 20px rgba(0,0,0,0.8);
+        }
     </style>
 </head>
 <body>
     <div id="root"></div>
+    <div id="sys-console"></div>
 
     <script type="text/babel" data-type="module">
         import React, { useState, useEffect, useRef } from 'react';
@@ -51,12 +91,12 @@
             Zap, BarChart3, ChevronRight, Activity, Filter, Database, FileText,
             Layers, Power, FileSpreadsheet, BrainCircuit, Languages, Globe,
             MessageCircle, DollarSign, Trees, Utensils, Book, WifiOff, X,
-            HelpCircle, Milestone, Lock, Map, Flag, Layout, RotateCcw
+            HelpCircle, Milestone, Lock, Map, Flag, LogIn, LogOut
         } from 'lucide-react';
         
         // --- Firebase ---
         import { initializeApp } from 'firebase/app';
-        import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+        import { getAuth, signInWithPopup, GoogleAuthProvider, signOut, onAuthStateChanged } from 'firebase/auth';
         import { getFirestore, collection, addDoc, updateDoc, deleteDoc, doc, setDoc, onSnapshot, serverTimestamp, query, orderBy, increment } from 'firebase/firestore';
 
         // =================================================================================
@@ -64,7 +104,7 @@
         // =================================================================================
         
         const myFirebaseConfig = {
-             apiKey: "AIzaSyAgNktz8JUCOglOtB-zyle-FSfIV0TbVRc",
+  apiKey: "AIzaSyAgNktz8JUCOglOtB-zyle-FSfIV0TbVRc",
   authDomain: "blackbox-48253.firebaseapp.com",
   projectId: "blackbox-48253",
   storageBucket: "blackbox-48253.firebasestorage.app",
@@ -75,9 +115,18 @@
         // =================================================================================
 
         const firebaseConfig = (typeof __firebase_config !== 'undefined') ? JSON.parse(__firebase_config) : myFirebaseConfig;
-        const app = Object.keys(firebaseConfig).length > 0 ? initializeApp(firebaseConfig) : null;
-        const auth = app ? getAuth(app) : null;
-        const db = app ? getFirestore(app) : null;
+        
+        // Init Firebase safely
+        let app, auth, db;
+        const provider = new GoogleAuthProvider();
+        try {
+            if (Object.keys(firebaseConfig).length > 0 && firebaseConfig.apiKey) {
+                app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+            }
+        } catch (e) { console.error("Firebase init failed:", e); }
+
         const appId = typeof __app_id !== 'undefined' ? __app_id : 'tactical-ops-standalone';
 
         // --- Mock Data ---
@@ -357,7 +406,7 @@
                                     </div>
                                     <div className="flex items-center gap-2">
                                         <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded bg-black/20 ${config.color} border border-white/5`}>{config.label}</span>
-                                        <button onClick={(e) => { e.stopPropagation(); onDeleteTask(task.id); }} className="text-slate-500 hover:text-rose-500 transition-opacity p-2"><Trash2 size={14}/></button>
+                                        <button onClick={(e) => { e.stopPropagation(); onDeleteTask(task.id); }} className="text-slate-500 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14}/></button>
                                     </div>
                                 </div>
                             );
@@ -394,8 +443,8 @@
                                 <Activity size={12} className="text-rose-500 shrink-0"/>
                                 <span className="text-rose-400 text-xs font-mono truncate flex-1">{item.text}</span>
                                 <div className="flex gap-1">
-                                    <button onClick={() => onUpdateTask(item.id, 'pending')} className="text-slate-500 hover:text-cyan-400 p-1" title="Restore to Pending"><RotateCcw size={12}/></button>
-                                    <button onClick={() => onDeleteTask(item.id)} className="text-slate-500 hover:text-rose-500 p-1" title="Delete Permanent"><Trash2 size={12}/></button>
+                                    <button onClick={() => onUpdateTask(item.id, 'pending')} className="text-slate-500 hover:text-cyan-400 p-1" title="Restore"><RotateCcw size={12}/></button>
+                                    <button onClick={() => onDeleteTask(item.id)} className="text-slate-500 hover:text-rose-500 p-1" title="Delete"><Trash2 size={12}/></button>
                                 </div>
                             </div>
                         ))
@@ -419,7 +468,7 @@
                         {history.length === 0 && <div className={`text-center text-[10px] py-4 ${theme.textDim}`}>{t.systemReady}</div>}
                         {history.slice().reverse().map((entry, i) => (
                             <div key={i} className="mb-1.5 flex gap-2 group items-center text-xs font-mono">
-                                <button onClick={() => onDeleteLogEntry(entry)} className="text-slate-600 hover:text-rose-500 transition-opacity p-1"><X size={10} /></button>
+                                <button onClick={() => onDeleteLogEntry(entry)} className="opacity-100 text-slate-600 hover:text-rose-500 transition-opacity"><X size={10} /></button>
                                 <span className="text-slate-500">[{new Date(entry.timestamp).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}]</span>
                                 <span className="text-cyan-500 flex-1 truncate">{entry.text}</span>
                                 <span className="text-emerald-500">{entry.points}</span>
@@ -491,29 +540,69 @@
                     setLoading(false); 
                     return; 
                 }
-                signInAnonymously(auth).catch(e => console.error(e));
-                return onAuthStateChanged(auth, u => {
-                    setUser(u);
-                    if (!u) {
-                        setTasks(MOCK_DATA.tasks); 
-                        setHistory(MOCK_DATA.history); 
-                        setLoading(false);
-                    }
+                
+                const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+                    setUser(currentUser);
+                    setLoading(false);
                 });
+                return () => unsubscribe();
             }, []);
 
-            // Data Sync
+            const handleLogin = async () => {
+                if (!auth) {
+                    alert("錯誤：Firebase 未初始化。請檢查程式碼中的設定。");
+                    return;
+                }
+                try {
+                    await signInWithPopup(auth, provider);
+                } catch (error) {
+                    console.error("Login failed:", error);
+                     if (error.code !== 'auth/unauthorized-domain' && error.code !== 'auth/popup-closed-by-user') {
+                         alert(`登入失敗: ${error.message}`);
+                    }
+                }
+            };
+            
+            const handleLogout = async () => {
+                if (auth) await signOut(auth);
+            };
+
+            // Data Sync (Simplified for integration)
             useEffect(() => {
-                if(!user || !db) return;
-                const unsubT = onSnapshot(query(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks')), s => setTasks(s.docs.map(d=>({id:d.id, ...d.data()}))));
-                const unsubH = onSnapshot(query(collection(db, 'artifacts', appId, 'users', user.uid, 'history')), s => {
-                    const h = s.docs.map(d=>({id:d.id, ...d.data()})).sort((a,b)=>new Date(a.timestamp)-new Date(b.timestamp));
-                    setHistory(h);
+                if(!user || !db) {
+                     // If logged out, reset to empty or mock
+                     if (!loading && !user && !auth) {
+                        setTasks(MOCK_DATA.tasks); 
+                        setHistory(MOCK_DATA.history); 
+                        setProXp(MOCK_DATA.stats.pro); 
+                        setLifeXp(MOCK_DATA.stats.life);
+                     }
+                     return;
+                }
+                
+                const qTasks = query(collection(db, 'artifacts', appId, 'users', user.uid, 'tasks'));
+                const unsubT = onSnapshot(qTasks, snap => {
+                    const loadedTasks = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                    setTasks(loadedTasks);
                 });
-                const unsubS = onSnapshot(doc(db, 'artifacts', appId, 'users', user.uid, 'data', 'stats'), s => {
-                    if(s.exists()) { setProXp(s.data().pro||0); setLifeXp(s.data().life||0); }
+
+                const qHistory = query(collection(db, 'artifacts', appId, 'users', user.uid, 'history'));
+                const unsubH = onSnapshot(qHistory, snap => {
+                    const loadedHistory = snap.docs.map(d => ({id: d.id, ...d.data()}));
+                    loadedHistory.sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
+                    setHistory(loadedHistory);
                 });
-                setLoading(false);
+
+                const statsRef = doc(db, 'artifacts', appId, 'users', user.uid, 'data', 'stats');
+                const unsubS = onSnapshot(statsRef, snap => {
+                    if(snap.exists()) { 
+                        setProXp(snap.data().pro || 0); 
+                        setLifeXp(snap.data().life || 0); 
+                    } else {
+                        setProXp(0); setLifeXp(0);
+                    }
+                });
+                
                 return () => { unsubT(); unsubH(); unsubS(); };
             }, [user]);
 
@@ -553,7 +642,15 @@
                     setHistory(p=>[...p, {id: Date.now(), text: reason, points: `+${amount}`, timestamp: new Date().toISOString()}]);
                 }
             };
-            const handleClearHistory = async () => setHistory([]);
+            const handleClearHistory = async () => {
+                if(db && user) {
+                     // Careful with bulk delete in real app, simplified here
+                     history.forEach(h => {
+                         if(!h.id.toString().startsWith('h')) deleteDoc(doc(db, 'artifacts', appId, 'users', user.uid, 'history', h.id));
+                     });
+                }
+                setHistory([]);
+            };
 
             const handleDeleteLogEntry = async (entry) => {
                 if(db && user && !entry.id.toString().startsWith('h')) {
@@ -576,8 +673,24 @@
                     <div className="scan-line"></div>
                     
                     {/* Header: XP Gauges (Fixed at top) */}
-                    <header className="mb-4 grid grid-cols-2 gap-3 shrink-0">
-                        <div 
+                    <header className="mb-4 flex justify-between items-center shrink-0">
+                         <div className="flex items-center gap-3">
+                            <div className="p-2 bg-slate-800/50 rounded border border-slate-700"><Target className="text-cyan-400" size={20} /></div>
+                            <div>
+                                <h1 className="text-xl font-bold tracking-widest text-cyan-400">TACTICAL OPS</h1>
+                                <p className="text-[10px] text-slate-500">{user ? user.email : 'OFFLINE'}</p>
+                            </div>
+                        </div>
+                        {user ? (
+                            <button onClick={handleLogout} className="text-rose-400 hover:text-rose-300 p-2 hover:bg-slate-800 rounded-full"><LogOut size={20} /></button>
+                        ) : (
+                            <button onClick={handleLogin} className="flex items-center gap-2 bg-cyan-600 hover:bg-cyan-500 text-white px-3 py-1.5 rounded-full text-xs font-bold transition-all"><LogIn size={14}/> LOGIN</button>
+                        )}
+                    </header>
+                    
+                    {/* XP Overview */}
+                    <div className="grid grid-cols-2 gap-3 mb-4 shrink-0">
+                         <div 
                             className="bg-slate-900 border border-slate-800 p-3 rounded-xl flex flex-col justify-between h-20 relative overflow-hidden group hover:border-orange-500/50 transition-colors cursor-pointer" 
                             onClick={() => addXp('pro', 10, 'Manual Pro XP')}
                         >
@@ -600,7 +713,8 @@
                                 <div className="h-full bg-emerald-500 transition-all duration-1000" style={{width: `${Math.min((lifeXp % 1000)/1000*100, 100)}%`}}></div>
                             </div>
                         </div>
-                    </header>
+                    </div>
+
                     
                     {/* Phase Progress Bar (Clickable) */}
                     <div 
